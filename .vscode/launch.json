@@ -1,0 +1,21 @@
+{
+  "configurations": [
+    {
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "name": "dev:server",
+      "args": [
+        "-r",
+        "tsconfig-paths/register",
+        "-r",
+        "dotenv/config",
+        "${workspaceFolder}/server/index.ts"
+      ],
+      "request": "launch",
+      "restart": true,
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/nodemon",
+      "skipFiles": ["<node_internals>/**"],
+      "type": "pwa-node"
+    }
+  ]
+}

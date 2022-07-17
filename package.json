@@ -1,0 +1,16 @@
+{
+  "name": "BSONDB",
+  "version": "1.0.0",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^18.0.4",
+    "prettier": "^2.7.1",
+    "ts-node": "^10.9.1"
+  },
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "object-sizeof": "^1.6.3",
+    "snappy": "^7.1.1"
+  },
+  "main": "index.js"
+}

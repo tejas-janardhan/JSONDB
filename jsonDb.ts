@@ -1,7 +1,7 @@
 import EventEmitter from "events";
 import Collection from "./collection";
-import { DOCUMENT, FILTER } from "./constants";
-import { generateId, objLog } from "./utils";
+import { DOCDATA, Document, Filter, FilterOptions } from "./constants";
+import { generateId } from "./utils";
 
 const server = new EventEmitter();
 const sendRequest = (endPoint: string, data: Record<any, any>) =>
@@ -20,11 +20,12 @@ const sendRequestWResponse = (
 };
 
 // Add index support.
-// Add deleteOne and updateOne.
-// seperate server and client. and add error handling
-// add compression snappy.
+// seperate server and client. and add error handling and jsondb:// connection string current focus.
 // add multiple collection support to client
-// add createdAt and updatedAt
+// add env vars
+// add ts support to client and schema support.
+// add user support
+// add projection support after client server seperation.
 
 const COLL_NAME = "collection1";
 
@@ -37,59 +38,81 @@ const getCollection = (collectionName: string) => {
 };
 
 const engine = {
-  _idFilter: (ids: string[], collection: Collection) => {
+  _idFilter: (
+    ids: string[],
+    collection: Collection,
+    getOne: boolean
+  ): Document[] => {
+    if (getOne) {
+      for (const id of ids) {
+        const document = collection.getById(id);
+        if (document) return [document];
+      }
+      return [];
+    }
     return ids
       .map((id) => collection.getById(id))
       .filter((document) => Boolean(document));
   },
-  _validateFilter: (filter: FILTER) => {
+  _validateFilter: (filter: Filter): void => {
     if (filter === {}) {
       throw Error("Empty filter.");
     }
   },
-  _filter: (filter: FILTER, collection: Collection) => {
-    let foundDocs: DOCUMENT[] = [];
+  _filter: (
+    filter: Filter,
+    collection: Collection,
+    filterOptions: FilterOptions = {}
+  ): Document[] => {
+    let foundDocs: Document[] = [];
+    const getOne = Boolean(filterOptions.getOne);
 
     const { id: filterId, ...filterRest } = filter;
     if (filterId) {
       foundDocs = engine._idFilter(
         Array.isArray(filterId) ? filterId : [filterId],
-        collection
+        collection,
+        getOne
       );
+      if (getOne) return foundDocs;
     }
 
-    const docFilterFunc = (document: DOCUMENT) => {
+    const docFilterFunc = (document: Document): boolean => {
       return Object.entries(filterRest).every(([field, value]) => {
         return document[field] === value;
       });
     };
 
     if (!foundDocs.length && filterRest) {
-      foundDocs = collection.filter(docFilterFunc);
+      foundDocs = collection.filter(docFilterFunc, getOne);
     } else if (filterRest) {
       foundDocs.filter(docFilterFunc);
     }
 
-    return foundDocs.map((document) => document);
+    return foundDocs;
   },
   count: () => {
     const collection = getCollection(COLL_NAME);
     return collection.totalCount();
   },
-  insert: (documents: Omit<DOCUMENT, "id">[]) => {
+  insert: (newdocs: DOCDATA[]) => {
     const collection = getCollection(COLL_NAME);
-    documents.forEach((document) => {
-      const id = generateId();
-      collection.addTemp({ ...document, id });
+    newdocs.forEach((newDoc) => {
+      collection.addTemp({
+        ...newDoc,
+        id: generateId(),
+        updatedAt: new Date().toJSON(),
+        createdAt: new Date().toJSON(),
+      });
     });
     collection.write();
   },
-  filter: (filter: FILTER) => {
+  filter: (filter: Filter) => {
     engine._validateFilter(filter);
     const collection = getCollection(COLL_NAME);
     return engine._filter(filter, collection);
   },
-  update: (filter: FILTER, updateData: Omit<DOCUMENT, "id">) => {
+  update: (filter: Filter, updateData: DOCDATA) => {
     engine._validateFilter(filter);
     const collection = getCollection(COLL_NAME);
     const foundDocs = engine._filter(filter, collection);
@@ -97,12 +120,16 @@ const engine = {
     if (!foundDocs.length) throw Error("Cannot find any elements to update");
 
     foundDocs.forEach((document) => {
-      collection.replaceTemp({ ...document, ...updateData });
+      collection.replaceTemp({
+        ...document,
+        ...updateData,
+        updatedAt: new Date().toJSON(),
+      });
     });
 
     collection.write();
   },
-  delete: (filter: FILTER) => {
+  delete: (filter: Filter) => {
     engine._validateFilter(filter);
     const collection = getCollection(COLL_NAME);
     const foundDocs = engine._filter(filter, collection);
@@ -112,7 +139,28 @@ const engine = {
     foundDocs.forEach((document) => {
       collection.deleteTemp(document.id);
     });
+    collection.write();
+  },
+  updateOne: (filter: Filter, updateData: DOCDATA) => {
+    engine._validateFilter(filter);
+    const collection = getCollection(COLL_NAME);
+    const [foundDoc] = engine._filter(filter, collection, { getOne: true });
 
+    if (!foundDoc) throw Error("Cannot find any element to update");
+    collection.replaceTemp({
+      ...foundDoc,
+      ...updateData,
+      updatedAt: new Date().toJSON(),
+    });
+    collection.write();
+  },
+  deleteOne: (filter: Filter) => {
+    engine._validateFilter(filter);
+    const collection = getCollection(COLL_NAME);
+    const [foundDoc] = engine._filter(filter, collection, { getOne: true });
+
+    if (!foundDoc) throw Error("Cannot find any element to delete");
+    collection.deleteTemp(foundDoc.id);
     collection.write();
   },
 };
@@ -123,7 +171,7 @@ server.on("insert", (docsString) => {
 
 server.on("filter", (filterString) => {
   setImmediate(() => {
-    const filter: FILTER = JSON.parse(filterString);
+    const filter: Filter = JSON.parse(filterString);
     const documentList = engine.filter(filter);
     server.emit("filter-response", JSON.stringify(documentList));
   });
@@ -141,43 +189,56 @@ server.on("update", (updateString) => {
 });
 
 server.on("delete", (filterString) => {
-  engine.delete(JSON.parse(filterString));
+  const filter: Filter = JSON.parse(filterString);
+  engine.delete(filter);
+});
+
+server.on("updateOne", (updateString) => {
+  const { filter, data } = JSON.parse(updateString);
+  engine.updateOne(filter, data);
+});
+
+server.on("deleteOne", (filterString) => {
+  const filter: Filter = JSON.parse(filterString);
+  engine.deleteOne(filter);
 });
 
 const client = {
-  insert: (documents: Omit<DOCUMENT, "id">[] | Omit<DOCUMENT, "id">) => {
+  insert: (documents: DOCDATA[] | DOCDATA) => {
     sendRequest("insert", Array.isArray(documents) ? documents : [documents]);
   },
-  filter: async (filter: FILTER) => {
+  filter: async (filter: Filter) => {
     return await sendRequestWResponse("filter", filter);
   },
   count: async () => {
     return await sendRequestWResponse("count");
   },
-  update: (filter: FILTER, data: Omit<DOCUMENT, "id">) => {
+  update: (filter: Filter, data: DOCDATA) => {
     sendRequest("update", { filter, data });
   },
-  delete: (filter: FILTER) => {
+  delete: (filter: Filter) => {
     sendRequest("delete", filter);
+  },
+  updateOne: (filter: Filter, data: DOCDATA) => {
+    sendRequest("updateOne", { filter, data });
+  },
+  deleteOne: (filter: Filter) => {
+    sendRequest("deleteOne", filter);
   },
 };
 
 const main = async () => {
-  // client.insert(
-  //   Array(2000)
-  //     .fill(0)
-  //     .map((_) => ({ temp: 400 }))
-  // );
-  console.log(await client.count());
-  client.delete({ test: 2, temp: 200, ruby: 3000 });
-  console.log(await client.count());
+  client.insert({ name1: 400, name2: 400, name3: 400 });
+  // console.log(await client.count());
+  // console.log(client.delete({ temp: 200 }));
+  // console.log(await client.count());
   // console.time();
-  // console.log(
-  //   await client.filter({
-  //     id: ["7a8165e91e88735b", "374b06ac6c4d54ac"],
-  //     temp: 300,
-  //   })
-  // );
+  const docs = (await client.filter({
+    name1: 400,
+  })) as any[];
+
+  console.log(docs);
+
   // console.timeEnd();
   // console.time();
   // console.log(
@@ -188,7 +249,6 @@ const main = async () => {
   // );
   // console.timeEnd();
 };
-
 main();
 
 // client.insert({

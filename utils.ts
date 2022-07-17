@@ -1,6 +1,5 @@
 import * as fs from "fs";
-
-const crypto = require("crypto");
+import crypto from "crypto";
 
 export const generateId: () => string = () =>
   crypto.randomBytes(8).toString("hex");

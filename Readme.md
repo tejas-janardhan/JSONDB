@@ -6,3 +6,9 @@ Internal API must have hard inputs.
 About Project -
 
 Create a fast as possible noSQL mongo-like db using only json files.
+
+Internal Notes:
+
+Date objects get converted to string in the collection. and retrieved as strings
+
+Nature of exceptions vs returning nothing [] , null or undefined

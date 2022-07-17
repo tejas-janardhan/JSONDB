@@ -1,4 +1,12 @@
 // Holds all types and constants.
-export type DOCUMENT = Record<string, any> & { id: string };
-export type FILTER = Record<string, any>;
-export type CHUNKED_COLLECTION = Record<string, DOCUMENT>;
+export type DOCDATA = Record<string, any>;
+export type Document = DOCDATA & {
+  id: string;
+  updatedAt: string;
+  createdAt: string;
+};
+export type Filter = Record<string, any>;
+export type CHUNKED_COLLECTION = Record<string, Document>;
+export type FilterOptions = {
+  getOne?: boolean;
+};

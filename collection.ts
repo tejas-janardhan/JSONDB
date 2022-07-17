@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import sizeof from "object-sizeof";
-import { DOCUMENT } from "./constants";
+import { Document } from "./constants";
 import { objfromJsonPath, writeObjToJson } from "./utils";
 
 const DATA_DIR = __dirname + "/data";
@@ -9,6 +9,9 @@ const MAX_FILESIZE = 41943040; // 40 mb
 
 // Add support for multiple chunks in memory.
 // Change to Map or a faster node js hash map implementation.
+// backup support and restore.
+// make read and write non blocking except those in constructor.
+// add compression snappy.
 class Collection {
   metaData: {
     count: number;
@@ -19,12 +22,12 @@ class Collection {
   writes:
     | Record<
         string,
-        { insert?: DOCUMENT[]; update?: DOCUMENT[]; delete?: string[] }
+        { insert?: Document[]; update?: Document[]; delete?: string[] }
       >
     | undefined;
-  collectionChunk: { chunkKey: string; chunk: Record<string, DOCUMENT> };
+  collectionChunk: { chunkKey: string; chunk: Record<string, Document> };
 
-  private getSize(document: DOCUMENT) {
+  private getSize(document: Document) {
     return sizeof(document) + sizeof(document.id);
   }
 
@@ -65,6 +68,13 @@ class Collection {
     }
   }
 
+  private verifyChunks() {
+    return (
+      fs.readdirSync(this.getDirPath()).length - 2 ===
+      Object.keys(this.metaData.chunkSize).length
+    );
+  }
+
   private getNewChunkKey(docSize: number) {
     if (!this.numChunks()) return "chunk1";
     const [chosenKey, _] = Object.entries(this.metaData.chunkSize).reduce(
@@ -89,8 +99,11 @@ class Collection {
       try {
         this.loadInitData();
       } catch {
-        throw Error("Files corrupted please restore or reset .");
+        throw new Error("Files corrupted please restore or reset .");
       }
+
+      if (!this.verifyChunks())
+        throw new Error("Files corrupted please restore or reset .");
     } else {
       this.createCollectionDir();
     }
@@ -105,12 +118,24 @@ class Collection {
   }
 
   // Very Slow.
-  public filter(filterFunc: (document: DOCUMENT) => boolean) {
-    const foundDocs: DOCUMENT[] = [];
+  public filter(
+    filterFunc: (document: Document) => boolean,
+    getOne: boolean
+  ): Document[] {
     const chunkKeys = Object.keys(this.metaData.chunkSize);
+    if (getOne) {
+      for (const chunkKey of chunkKeys) {
+        if (this.collectionChunk.chunkKey !== chunkKey) {
+          this.loadChunk(chunkKey);
+        }
+        for (const document of Object.values(this.collectionChunk.chunk)) {
+          if (filterFunc(document)) return [document];
+        }
+      }
+    }
+    const foundDocs: Document[] = [];
     chunkKeys.forEach((chunkKey) => {
       if (this.collectionChunk.chunkKey !== chunkKey) {
-        // Only relevant for the first interation.
         this.loadChunk(chunkKey);
       }
       Object.values(this.collectionChunk.chunk).forEach((document) => {
@@ -121,7 +146,7 @@ class Collection {
     return foundDocs;
   }
 
-  public addTemp(document: DOCUMENT) {
+  public addTemp(document: Document) {
     const id = document.id;
     if (!id) {
       throw Error("Id must exist in document");
@@ -141,8 +166,8 @@ class Collection {
     }
   }
 
-  public replaceTemp(newDocument: DOCUMENT) {
-    if (newDocument.id) {
+  public replaceTemp(newDocument: Document) {
+    if (!newDocument.id) {
       throw Error("Id must exist in document");
     }
     const chunkKey = this.idChunkMap[newDocument.id];

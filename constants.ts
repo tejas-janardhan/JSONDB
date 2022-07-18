@@ -1,6 +1,6 @@
 // Holds all types and constants.
-export type DOCDATA = Record<string, any>;
-export type Document = DOCDATA & {
+export type DocData = Record<string, any>;
+export type Document = DocData & {
   id: string;
   updatedAt: string;
   createdAt: string;

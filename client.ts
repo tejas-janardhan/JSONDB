@@ -1,7 +1,7 @@
-import { DocData, Filter } from "./constants";
+import { DocData, Filter, Projection } from "./constants";
 import axios from "axios";
 
-// add multiple collection support to client
+// add client connection interface
 // add get all, flush, update all,
 // add bulk writes
 // add ts collection support
@@ -9,7 +9,7 @@ const HOST = "127.0.0.1";
 const PORT = 4354;
 const OP_URL = `http://${HOST}:${PORT}/op`;
 
-class ClientConnection {
+class Collection {
   constructor(readonly collectionName: string) {}
 
   public async insert(documents: DocData[] | DocData) {
@@ -26,11 +26,14 @@ class ClientConnection {
     return true;
   }
 
-  public async filter(filter: Filter) {
+  public async filter(
+    filter: Filter,
+    projection: Projection | undefined = undefined
+  ) {
     const response = await axios.post(OP_URL, {
       op: "filter",
       collectionName: this.collectionName,
-      payload: { filter },
+      payload: { filter, projection },
     });
     if (response.status !== 200) {
       throw Error(response.statusText);

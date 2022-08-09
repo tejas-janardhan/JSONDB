@@ -12,3 +12,6 @@ Internal Notes:
 Date objects get converted to string in the collection. and retrieved as strings
 
 Nature of exceptions vs returning nothing [] , null or undefined
+
+TODO
+Write test suite to keep it in check.

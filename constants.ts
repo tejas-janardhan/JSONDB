@@ -10,3 +10,5 @@ export type CHUNKED_COLLECTION = Record<string, Document>;
 export type FilterOptions = {
   getOne?: boolean;
 };
+export type Projection = Array<string>;
+export type Index = Record<string, string[]>;

@@ -1,9 +1,18 @@
 import Collection from "./collection";
-import { DocData, Document, Filter, FilterOptions } from "./constants";
+import {
+  DocData,
+  Document,
+  Filter,
+  FilterOptions,
+  Projection,
+} from "./constants";
 import { generateId } from "./utils";
 
-// add projection support after client server seperation only here not in collection layer.
-// add index support
+// add single index support current focus
+// add batching support
+// concurrent request support.
+// add collection cache limit
+// lru cache library and replace other cacehs with it too (NodeCache??)
 class Engine {
   collectionCache: Record<string, Collection>;
 
@@ -12,23 +21,6 @@ class Engine {
       this.collectionCache[collectionName] = new Collection(collectionName);
     }
     return this.collectionCache[collectionName];
-  }
-
-  private idFilter(
-    ids: string[],
-    collection: Collection,
-    getOne: boolean
-  ): Document[] {
-    if (getOne) {
-      for (const id of ids) {
-        const document = collection.getById(id);
-        if (document) return [document];
-      }
-      return [];
-    }
-    return ids
-      .map((id) => collection.getById(id))
-      .filter((document) => Boolean(document));
   }
 
   private validateFilter(filter: Filter): void {
@@ -46,13 +38,19 @@ class Engine {
     const getOne = Boolean(filterOptions.getOne);
 
     const { id: filterId, ...filterRest } = filter;
+
     if (filterId) {
-      foundDocs = this.idFilter(
-        Array.isArray(filterId) ? filterId : [filterId],
-        collection,
-        getOne
-      );
-      if (getOne) return foundDocs;
+      const ids = Array.isArray(filterId) ? filterId : [filterId];
+      if (getOne) {
+        for (const id of ids) {
+          const document = collection.getById(id);
+          if (document) return [document];
+        }
+        return [];
+      }
+      foundDocs = ids
+        .map((id) => collection.getById(id))
+        .filter((document) => Boolean(document));
     }
 
     const docFilterFunc = (document: Document): boolean => {
@@ -61,12 +59,11 @@ class Engine {
       });
     };
 
-    if (!foundDocs.length && filterRest) {
+    if (!filterId && filterRest) {
       foundDocs = collection.filter(docFilterFunc, getOne);
     } else if (filterRest) {
-      foundDocs.filter(docFilterFunc);
+      return foundDocs.filter(docFilterFunc);
     }
-
     return foundDocs;
   }
 
@@ -92,10 +89,32 @@ class Engine {
     collection.write();
   }
 
-  public filter(collectionName: string, filter: Filter): Document[] {
+  public filter(
+    collectionName: string,
+    filter: Filter,
+    projection: Projection | undefined = undefined
+  ): Document[] {
     this.validateFilter(filter);
     const collection = this.getCollection(collectionName);
-    return this.internalFilter(filter, collection);
+    const documents = this.internalFilter(filter, collection);
+
+    if (projection) {
+      const projectionMap = projection.reduce((map, field) => {
+        map[field] = 1;
+        return map;
+      }, {} as Record<string, 1>);
+      projectionMap["id"] = 1;
+      projectionMap["updatedAt"] = 1;
+      projectionMap["createdAt"] = 1;
+      return documents.map((document) => {
+        Object.keys(document).forEach((field) => {
+          if (!projectionMap[field]) delete document[field];
+        });
+        return document;
+      });
+    } else {
+      return documents;
+    }
   }
 
   public update(collectionName: string, filter: Filter, updateData: DocData) {
@@ -159,6 +178,11 @@ class Engine {
     if (!foundDoc) throw Error("Cannot find any element to delete");
     collection.deleteTemp(foundDoc.id);
     collection.write();
+  }
+
+  public createIndex(collectionName: string, field: string) {
+    const collection = this.getCollection(collectionName);
+    collection.createIndex(field);
   }
 }
 

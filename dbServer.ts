@@ -39,7 +39,13 @@ fastify.post("/op", function (request, reply) {
       engine.insert(collectionName, payload.documents);
       return {};
     case "filter":
-      return { documents: engine.filter(collectionName, payload.filter) };
+      return {
+        documents: engine.filter(
+          collectionName,
+          payload.filter,
+          payload.projection
+        ),
+      };
     case "update":
       engine.update(collectionName, payload.filter, payload.data);
       return {};
@@ -52,6 +58,8 @@ fastify.post("/op", function (request, reply) {
     case "deleteOne":
       engine.deleteOne(collectionName, payload.filter);
       return {};
+    case "createIndex":
+      engine.createIndex(collectionName, payload.field);
     default:
       reply.code(404).send("Op not found!");
   }

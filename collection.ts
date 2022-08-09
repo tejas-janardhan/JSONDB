@@ -1,31 +1,35 @@
 import * as fs from "fs";
 import sizeof from "object-sizeof";
-import { Document } from "./constants";
+import { Document, Index } from "./constants";
 import { objfromJsonPath, writeObjToJson } from "./utils";
 
 const DATA_DIR = __dirname + "/data";
-const DEFAULT_COLL_CHUNK = { chunkKey: "", chunk: {} };
-const MAX_FILESIZE = 41943040; // 40 mb
+const MAX_CHUNK_SIZE = 41943040; // 40 mb
+const CHUNK_CACHE_LIMIT = 4;
 
-// Add support for multiple chunks in memory.
 // Change to Map or a faster node js hash map implementation.
 // backup support and restore.
 // make read and write non blocking except those in constructor.
 // add compression snappy.
 class Collection {
+  // Notes : chunkInfo has a list of all chunks.
   metaData: {
     count: number;
-    chunkSize: Record<string, number>;
+    chunkInfo: Record<string, { size: number }>;
     collectionName: string;
+    index: string[];
   };
   idChunkMap: Record<string, string>;
   writes:
     | Record<
         string,
-        { insert?: Document[]; update?: Document[]; delete?: string[] }
+        { insert?: Document[]; replace?: Document[]; delete?: string[] }
       >
     | undefined;
-  collectionChunk: { chunkKey: string; chunk: Record<string, Document> };
+  chunkCache: Record<
+    string,
+    { chunk: Record<string, Document>; lastUsed: Date }
+  >;
 
   private getSize(document: Document) {
     return sizeof(document) + sizeof(document.id);
@@ -38,13 +42,13 @@ class Collection {
     } else {
       this.idChunkMap = {};
     }
-    this.collectionChunk = DEFAULT_COLL_CHUNK;
+    this.chunkCache = {};
   }
 
   private createCollectionDir() {
     fs.mkdirSync(this.getDirPath());
     this.idChunkMap = {};
-    this.collectionChunk = DEFAULT_COLL_CHUNK;
+    this.chunkCache = {};
     writeObjToJson(this.metaData, this.getDirPath() + "/metaData.json");
     writeObjToJson(this.idChunkMap, this.getDirPath() + "/idChunkMap.json");
   }
@@ -54,36 +58,52 @@ class Collection {
   }
 
   private numChunks() {
-    return Object.keys(this.metaData.chunkSize).length;
+    return Object.keys(this.metaData.chunkInfo).length;
   }
 
-  private loadChunk(chunkKey: string) {
-    try {
-      this.collectionChunk.chunk = objfromJsonPath(
-        this.getDirPath() + `/${chunkKey}.json`
-      );
-      this.collectionChunk.chunkKey = chunkKey;
-    } catch {
-      this.collectionChunk = { chunkKey, chunk: {} };
+  private getChunk(chunkKey: string) {
+    if (this.chunkCache[chunkKey]) {
+      this.chunkCache[chunkKey].lastUsed = new Date();
+    } else {
+      // cleanup
+      if (Object.keys(this.chunkCache).length === CHUNK_CACHE_LIMIT) {
+        const [[toDeleteKey, _]] = Object.entries(this.chunkCache).sort(
+          ([_, chunkDataA], [__, chunkDataB]) => {
+            if (chunkDataA.lastUsed < chunkDataB.lastUsed) return -1;
+            if (chunkDataA.lastUsed > chunkDataB.lastUsed) return 1;
+            return 0;
+          }
+        );
+        delete this.chunkCache[toDeleteKey];
+      }
+      try {
+        this.chunkCache[chunkKey] = {
+          chunk: objfromJsonPath(this.getDirPath() + `/${chunkKey}.json`),
+          lastUsed: new Date(),
+        };
+      } catch {
+        this.chunkCache[chunkKey] = { chunk: {}, lastUsed: new Date() };
+      }
     }
+    return this.chunkCache[chunkKey].chunk;
   }
 
   private verifyChunks() {
     return (
       fs.readdirSync(this.getDirPath()).length - 2 ===
-      Object.keys(this.metaData.chunkSize).length
+      Object.keys(this.metaData.chunkInfo).length
     );
   }
 
-  private getNewChunkKey(docSize: number) {
+  private getInsertChunkKey(docSize: number) {
     if (!this.numChunks()) return "chunk1";
-    const [chosenKey, _] = Object.entries(this.metaData.chunkSize).reduce(
-      ([chosenKey, minSize], [chunkKey, size]) => {
-        if (size + docSize < minSize && size + docSize < MAX_FILESIZE)
+    const [chosenKey, _] = Object.entries(this.metaData.chunkInfo).reduce(
+      ([chosenKey, minSize], [chunkKey, { size }]) => {
+        if (size + docSize < minSize && size + docSize < MAX_CHUNK_SIZE)
           return [chunkKey, size];
         return [chosenKey, minSize];
       },
-      [undefined, MAX_FILESIZE] as [string | undefined, number]
+      [undefined, MAX_CHUNK_SIZE] as [string | undefined, number]
     );
     if (chosenKey) return chosenKey;
     return `chunk${this.numChunks() + 1}`;
@@ -92,8 +112,9 @@ class Collection {
   constructor(collectionName: string) {
     this.metaData = {
       count: 0,
-      chunkSize: {},
+      chunkInfo: {},
       collectionName: collectionName,
+      index: [],
     };
     if (fs.existsSync(this.getDirPath())) {
       try {
@@ -111,10 +132,54 @@ class Collection {
 
   public getById(id: string) {
     const chunkKey = this.idChunkMap[id];
-    if (this.collectionChunk.chunkKey !== chunkKey) {
-      this.loadChunk(chunkKey);
+    const chunk = this.getChunk(chunkKey);
+    return chunk[id];
+  }
+
+  public checkIndex(field: string) {
+    return this.metaData.index.includes(field);
+  }
+
+  private updateIndex(
+    field: string,
+    addValueIdsMap: Record<any, string[]>,
+    removeValueIdsMap: Record<any, string[]>
+  ) {
+    const index: Index = objfromJsonPath(
+      this.getDirPath() + `/${field}Index.json`
+    );
+    Object.entries(addValueIdsMap).map(([value, ids]) => {
+      if (index[value]) {
+        index[value].concat(ids);
+      } else {
+        index[value] = ids;
+      }
+    });
+    Object.entries(removeValueIdsMap).map(([value, ids]) => {
+      index[value] = index[value].filter((id) => !ids.includes(id));
+    });
+    writeObjToJson(index, this.getDirPath() + `/${field}Index.json`);
+  }
+
+  public getIdsByIndex(field: string, value: any) {
+    // add index cache with node cache.
+    const index: Index = objfromJsonPath(
+      this.getDirPath() + `/${field}Index.json`
+    );
+
+    return index[value] ?? [];
+  }
+
+  private *iterator() {
+    // iterates over the entire collection.
+    const chunkKeys = Object.keys(this.metaData.chunkInfo);
+
+    for (const chunkKey of chunkKeys) {
+      const chunk = this.getChunk(chunkKey);
+      for (const document of Object.values(chunk)) {
+        yield document;
+      }
     }
-    return this.collectionChunk.chunk[id];
   }
 
   // Very Slow.
@@ -122,28 +187,40 @@ class Collection {
     filterFunc: (document: Document) => boolean,
     getOne: boolean
   ): Document[] {
-    const chunkKeys = Object.keys(this.metaData.chunkSize);
-    if (getOne) {
-      for (const chunkKey of chunkKeys) {
-        if (this.collectionChunk.chunkKey !== chunkKey) {
-          this.loadChunk(chunkKey);
-        }
-        for (const document of Object.values(this.collectionChunk.chunk)) {
-          if (filterFunc(document)) return [document];
+    const foundDocs: Document[] = [];
+    for (const document of this.iterator()) {
+      if (filterFunc(document)) {
+        if (getOne) {
+          return [document];
+        } else {
+          foundDocs.push(document);
         }
       }
     }
-    const foundDocs: Document[] = [];
-    chunkKeys.forEach((chunkKey) => {
-      if (this.collectionChunk.chunkKey !== chunkKey) {
-        this.loadChunk(chunkKey);
-      }
-      Object.values(this.collectionChunk.chunk).forEach((document) => {
-        if (filterFunc(document)) foundDocs.push(document);
-      });
-    });
-
     return foundDocs;
+  }
+
+  private addToWrite(
+    data: Document | string,
+    chunkKey: string,
+    type: "insert" | "delete" | "replace"
+  ) {
+    if (type === "delete" && typeof data !== "string")
+      throw Error("Delete op needs data of type string");
+
+    if (this.writes) {
+      if (this.writes[chunkKey] && this.writes[chunkKey][type]) {
+        // @ts-ignore Added due to if gaurd above,
+        this.writes[chunkKey][type]!.push(data);
+      } else if (this.writes[chunkKey]) {
+        // @ts-ignore
+        this.writes[chunkKey][type] = [data];
+      } else {
+        this.writes[chunkKey] = { [type]: [data] };
+      }
+    } else {
+      this.writes = { [chunkKey]: { [type]: [document] } };
+    }
   }
 
   public addTemp(document: Document) {
@@ -151,19 +228,8 @@ class Collection {
     if (!id) {
       throw Error("Id must exist in document");
     }
-    const chunkKey = this.getNewChunkKey(this.getSize(document));
-
-    if (this.writes) {
-      if (this.writes[chunkKey] && this.writes[chunkKey]["insert"]) {
-        this.writes[chunkKey]["insert"]!.push(document);
-      } else if (this.writes[chunkKey]) {
-        this.writes[chunkKey]["insert"] = [document];
-      } else {
-        this.writes[chunkKey] = { insert: [document] };
-      }
-    } else {
-      this.writes = { [chunkKey]: { insert: [document] } };
-    }
+    const chunkKey = this.getInsertChunkKey(this.getSize(document));
+    this.addToWrite(document, chunkKey, "insert");
   }
 
   public replaceTemp(newDocument: Document) {
@@ -172,73 +238,49 @@ class Collection {
     }
     const chunkKey = this.idChunkMap[newDocument.id];
 
-    if (this.writes) {
-      if (this.writes[chunkKey] && this.writes[chunkKey]["update"]) {
-        this.writes[chunkKey]["update"]!.push(newDocument);
-      } else if (this.writes[chunkKey]) {
-        this.writes[chunkKey]["update"] = [newDocument];
-      } else {
-        this.writes[chunkKey] = { update: [newDocument] };
-      }
-    } else {
-      this.writes = { [chunkKey]: { update: [newDocument] } };
-    }
+    this.addToWrite(newDocument, chunkKey, "insert");
   }
 
   public deleteTemp(id: string) {
     const chunkKey = this.idChunkMap[id];
 
-    if (this.writes) {
-      if (this.writes[chunkKey] && this.writes[chunkKey]["delete"]) {
-        this.writes[chunkKey]["delete"]!.push(id);
-      } else if (this.writes[chunkKey]) {
-        this.writes[chunkKey]["delete"] = [id];
-      } else {
-        this.writes[chunkKey] = { delete: [id] };
-      }
-    } else {
-      this.writes = { [chunkKey]: { delete: [id] } };
-    }
+    this.addToWrite(id, chunkKey, "delete");
   }
 
   public write() {
     if (this.writes) {
       Object.entries(this.writes).forEach(([chunkKey, write]) => {
-        if (this.collectionChunk.chunkKey !== chunkKey) {
-          this.loadChunk(chunkKey);
-        }
+        const chunk = this.getChunk(chunkKey);
         if (write.insert) {
           write.insert.forEach((document) => {
             this.idChunkMap[document.id] = chunkKey;
-            this.collectionChunk.chunk[document.id] = document;
+            chunk[document.id] = document;
             this.metaData.count += 1;
-            this.metaData.chunkSize[chunkKey]
-              ? (this.metaData.chunkSize[chunkKey] += this.getSize(document))
-              : (this.metaData.chunkSize[chunkKey] = this.getSize(document));
+            this.metaData.chunkInfo[chunkKey]
+              ? (this.metaData.chunkInfo[chunkKey].size +=
+                  this.getSize(document))
+              : (this.metaData.chunkInfo[chunkKey] = {
+                  size: this.getSize(document),
+                });
           });
-        } else if (write.update) {
-          write.update.forEach((document) => {
-            this.metaData.chunkSize[chunkKey] -= this.getSize(
-              this.collectionChunk.chunk[document.id]
+        } else if (write.replace) {
+          write.replace.forEach((document) => {
+            this.metaData.chunkInfo[chunkKey].size -= this.getSize(
+              chunk[document.id]
             );
-            this.collectionChunk.chunk[document.id] = document;
-            this.metaData.chunkSize[chunkKey] += this.getSize(document);
+            chunk[document.id] = document;
+            this.metaData.chunkInfo[chunkKey].size += this.getSize(document);
           });
         } else if (write.delete) {
           write.delete.forEach((id) => {
             delete this.idChunkMap[id];
-            this.metaData.chunkSize[chunkKey] -= this.getSize(
-              this.collectionChunk.chunk[id]
-            );
-            delete this.collectionChunk.chunk[id];
+            this.metaData.chunkInfo[chunkKey].size -= this.getSize(chunk[id]);
+            delete chunk[id];
             this.metaData.count -= 1;
           });
         }
 
-        writeObjToJson(
-          this.collectionChunk.chunk,
-          this.getDirPath() + `/${chunkKey}.json`
-        );
+        writeObjToJson(chunk, this.getDirPath() + `/${chunkKey}.json`);
       });
       writeObjToJson(this.metaData, this.getDirPath() + "/metaData.json");
       if (
@@ -247,8 +289,26 @@ class Collection {
         writeObjToJson(this.idChunkMap, this.getDirPath() + "/idChunkMap.json");
       }
 
+      // update Indexes.
+
       this.writes = undefined;
     }
+  }
+
+  public createIndex(field: string) {
+    if (this.checkIndex(field)) {
+      throw Error("Index already exists");
+    }
+    const index: Record<any, string[]> = {};
+    for (const document of this.iterator()) {
+      index[document[field]]?.push(document.id) ||
+        (index[document[field]] = [document.id]);
+    }
+    if (!Object.keys(index).length)
+      throw Error("Index cannot be created, documents do not have field.");
+    this.metaData.index.push(field);
+    writeObjToJson(index, this.getDirPath() + `/${field}Index.json`);
+    writeObjToJson(this.metaData, this.getDirPath() + "metaData.json");
   }
 
   public canWrite() {
@@ -260,7 +320,7 @@ class Collection {
   }
 
   public clearCache() {
-    this.collectionChunk = DEFAULT_COLL_CHUNK;
+    this.chunkCache = {};
   }
 }
 

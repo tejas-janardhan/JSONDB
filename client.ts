@@ -9,7 +9,7 @@ const HOST = "127.0.0.1";
 const PORT = 4354;
 const OP_URL = `http://${HOST}:${PORT}/op`;
 
-class Collection {
+class ClientConnection {
   constructor(readonly collectionName: string) {}
 
   public async insert(documents: DocData[] | DocData) {

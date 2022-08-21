@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import Collection from "./collection";
 import {
   DocData,
@@ -7,20 +8,23 @@ import {
   Projection,
 } from "./constants";
 import { generateId } from "./utils";
+import LRUCache from "lru-cache";
 
-// add single index support current focus
-// add batching support
-// concurrent request support.
-// add collection cache limit
-// lru cache library and replace other cacehs with it too (NodeCache??)
+// add single index support.
+// add batch writes support
+// concurrent request support. Fix mutation bugs for this too.
 class Engine {
-  collectionCache: Record<string, Collection>;
+  collectionCache: LRUCache<string, Collection>;
+  dataDirPath: string;
 
   private getCollection(collectionName: string): Collection {
-    if (!this.collectionCache[collectionName]) {
-      this.collectionCache[collectionName] = new Collection(collectionName);
+    if (!this.collectionCache.has(collectionName)) {
+      this.collectionCache.set(
+        collectionName,
+        new Collection(collectionName, this.dataDirPath)
+      );
     }
-    return this.collectionCache[collectionName];
+    return this.collectionCache.get(collectionName)!;
   }
 
   private validateFilter(filter: Filter): void {
@@ -29,11 +33,11 @@ class Engine {
     }
   }
 
-  private internalFilter(
+  private async internalFilter(
     filter: Filter,
     collection: Collection,
     filterOptions: FilterOptions = {}
-  ): Document[] {
+  ): Promise<Document[]> {
     let foundDocs: Document[] = [];
     const getOne = Boolean(filterOptions.getOne);
 
@@ -43,14 +47,14 @@ class Engine {
       const ids = Array.isArray(filterId) ? filterId : [filterId];
       if (getOne) {
         for (const id of ids) {
-          const document = collection.getById(id);
+          const document = await collection.getById(id);
           if (document) return [document];
         }
         return [];
       }
-      foundDocs = ids
-        .map((id) => collection.getById(id))
-        .filter((document) => Boolean(document));
+      foundDocs = (
+        await Promise.all(ids.map((id) => collection.getById(id)))
+      ).filter((document) => Boolean(document));
     }
 
     const docFilterFunc = (document: Document): boolean => {
@@ -60,15 +64,19 @@ class Engine {
     };
 
     if (!filterId && filterRest) {
-      foundDocs = collection.filter(docFilterFunc, getOne);
+      foundDocs = await collection.filter(docFilterFunc, getOne);
     } else if (filterRest) {
       return foundDocs.filter(docFilterFunc);
     }
     return foundDocs;
   }
 
-  constructor() {
-    this.collectionCache = {};
+  constructor(dataDirPath: string | undefined = undefined) {
+    this.collectionCache = new LRUCache<string, Collection>({ max: 5 });
+    this.dataDirPath = dataDirPath ?? "./data";
+    if (!fs.existsSync(this.dataDirPath)) {
+      fs.mkdirSync(this.dataDirPath);
+    }
   }
 
   public count(collectionName: string) {
@@ -76,27 +84,34 @@ class Engine {
     return collection.totalCount();
   }
 
-  public insert(collectionName: string, newdocs: DocData[]): void {
+  public async insert(
+    collectionName: string,
+    newdocs: DocData[]
+  ): Promise<string[]> {
     const collection = this.getCollection(collectionName);
+    const insertedIds: string[] = [];
     newdocs.forEach((newDoc) => {
+      const id = generateId();
+      insertedIds.push(id);
       collection.addTemp({
         ...newDoc,
-        id: generateId(),
+        id,
         updatedAt: new Date().toJSON(),
         createdAt: new Date().toJSON(),
       });
     });
-    collection.write();
+    await collection.write();
+    return insertedIds;
   }
 
-  public filter(
+  public async filter(
     collectionName: string,
     filter: Filter,
     projection: Projection | undefined = undefined
-  ): Document[] {
+  ): Promise<Document[]> {
     this.validateFilter(filter);
     const collection = this.getCollection(collectionName);
-    const documents = this.internalFilter(filter, collection);
+    const documents = await this.internalFilter(filter, collection);
 
     if (projection) {
       const projectionMap = projection.reduce((map, field) => {
@@ -106,6 +121,7 @@ class Engine {
       projectionMap["id"] = 1;
       projectionMap["updatedAt"] = 1;
       projectionMap["createdAt"] = 1;
+      // iterate over projection not the document
       return documents.map((document) => {
         Object.keys(document).forEach((field) => {
           if (!projectionMap[field]) delete document[field];
@@ -117,10 +133,14 @@ class Engine {
     }
   }
 
-  public update(collectionName: string, filter: Filter, updateData: DocData) {
+  public async update(
+    collectionName: string,
+    filter: Filter,
+    updateData: DocData
+  ) {
     this.validateFilter(filter);
     const collection = this.getCollection(collectionName);
-    const foundDocs = this.internalFilter(filter, collection);
+    const foundDocs = await this.internalFilter(filter, collection);
 
     if (!foundDocs.length) throw Error("Cannot find any elements to update");
 
@@ -132,30 +152,30 @@ class Engine {
       });
     });
 
-    collection.write();
+    await collection.write();
   }
 
-  public delete(collectionName: string, filter: Filter) {
+  public async delete(collectionName: string, filter: Filter) {
     this.validateFilter(filter);
     const collection = this.getCollection(collectionName);
-    const foundDocs = this.internalFilter(filter, collection);
+    const foundDocs = await this.internalFilter(filter, collection);
 
     if (!foundDocs.length) throw Error("Cannot find any elements to delete");
 
     foundDocs.forEach((document) => {
       collection.deleteTemp(document.id);
     });
-    collection.write();
+    await collection.write();
   }
 
-  public updateOne(
+  public async updateOne(
     collectionName: string,
     filter: Filter,
     updateData: DocData
   ) {
     this.validateFilter(filter);
     const collection = this.getCollection(collectionName);
-    const [foundDoc] = this.internalFilter(filter, collection, {
+    const [foundDoc] = await this.internalFilter(filter, collection, {
       getOne: true,
     });
 
@@ -165,19 +185,19 @@ class Engine {
       ...updateData,
       updatedAt: new Date().toJSON(),
     });
-    collection.write();
+    await collection.write();
   }
 
-  public deleteOne(collectionName: string, filter: Filter) {
+  public async deleteOne(collectionName: string, filter: Filter) {
     this.validateFilter(filter);
     const collection = this.getCollection(collectionName);
-    const [foundDoc] = this.internalFilter(filter, collection, {
+    const [foundDoc] = await this.internalFilter(filter, collection, {
       getOne: true,
     });
 
     if (!foundDoc) throw Error("Cannot find any element to delete");
     collection.deleteTemp(foundDoc.id);
-    collection.write();
+    await collection.write();
   }
 
   public createIndex(collectionName: string, field: string) {

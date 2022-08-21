@@ -5,7 +5,7 @@ export type Document = DocData & {
   updatedAt: string;
   createdAt: string;
 };
-export type Filter = Record<string, any>;
+export type Filter = { id?: string[] | string } & Record<string, any>;
 export type CHUNKED_COLLECTION = Record<string, Document>;
 export type FilterOptions = {
   getOne?: boolean;

@@ -3,6 +3,7 @@ import axios from "axios";
 
 // add client connection interface
 // add get all, flush, update all,
+// add find - only gets one
 // add bulk writes
 // add ts collection support
 const HOST = "127.0.0.1";

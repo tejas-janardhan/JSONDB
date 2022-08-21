@@ -1,16 +1,23 @@
 import * as fs from "fs";
 import sizeof from "object-sizeof";
 import { Document, Index } from "./constants";
-import { objfromJsonPath, writeObjToJson } from "./utils";
+import {
+  objfromJsonPath,
+  objfromJsonPathSync,
+  writeObjToJson,
+  writeObjToJsonSync,
+} from "./utils";
 
-const DATA_DIR = __dirname + "/data";
+import LRUCache from "lru-cache";
+
 const MAX_CHUNK_SIZE = 41943040; // 40 mb
 const CHUNK_CACHE_LIMIT = 4;
+const INDEX_CACHE_LIMIT = 4;
 
 // Change to Map or a faster node js hash map implementation.
-// backup support and restore.
-// make read and write non blocking except those in constructor.
+// backup support and restore..
 // add compression snappy.
+// improve the size logic its broken, use buffers.
 class Collection {
   // Notes : chunkInfo has a list of all chunks.
   metaData: {
@@ -19,73 +26,63 @@ class Collection {
     collectionName: string;
     index: string[];
   };
-  idChunkMap: Record<string, string>;
+  dataDirPath: string;
+  idChunkMap: Map<string, string>;
   writes:
     | Record<
         string,
         { insert?: Document[]; replace?: Document[]; delete?: string[] }
       >
     | undefined;
-  chunkCache: Record<
-    string,
-    { chunk: Record<string, Document>; lastUsed: Date }
-  >;
+  chunkCache: LRUCache<string, Record<string, Document>>;
+  indexCache: LRUCache<string, Index>;
 
   private getSize(document: Document) {
     return sizeof(document) + sizeof(document.id);
   }
 
   private loadInitData() {
-    this.metaData = objfromJsonPath(this.getDirPath() + "/metaData.json");
+    // In constructor.
+    this.metaData = objfromJsonPathSync(this.getDirPath() + "/metaData.json");
     if (this.metaData.count !== 0) {
-      this.idChunkMap = objfromJsonPath(this.getDirPath() + "/idChunkMap.json");
+      this.idChunkMap = new Map(
+        Object.entries(
+          objfromJsonPathSync(this.getDirPath() + "/idChunkMap.json")
+        )
+      );
     } else {
-      this.idChunkMap = {};
+      this.idChunkMap = new Map();
     }
-    this.chunkCache = {};
   }
 
   private createCollectionDir() {
+    // In constructor.
     fs.mkdirSync(this.getDirPath());
-    this.idChunkMap = {};
-    this.chunkCache = {};
-    writeObjToJson(this.metaData, this.getDirPath() + "/metaData.json");
-    writeObjToJson(this.idChunkMap, this.getDirPath() + "/idChunkMap.json");
+    this.idChunkMap = new Map();
+    writeObjToJsonSync(this.metaData, this.getDirPath() + "/metaData.json");
+    writeObjToJsonSync(this.idChunkMap, this.getDirPath() + "/idChunkMap.json");
   }
 
   private getDirPath() {
-    return DATA_DIR + `/${this.metaData.collectionName}`;
+    return this.dataDirPath + `/${this.metaData.collectionName}`;
   }
 
   private numChunks() {
     return Object.keys(this.metaData.chunkInfo).length;
   }
 
-  private getChunk(chunkKey: string) {
-    if (this.chunkCache[chunkKey]) {
-      this.chunkCache[chunkKey].lastUsed = new Date();
-    } else {
-      // cleanup
-      if (Object.keys(this.chunkCache).length === CHUNK_CACHE_LIMIT) {
-        const [[toDeleteKey, _]] = Object.entries(this.chunkCache).sort(
-          ([_, chunkDataA], [__, chunkDataB]) => {
-            if (chunkDataA.lastUsed < chunkDataB.lastUsed) return -1;
-            if (chunkDataA.lastUsed > chunkDataB.lastUsed) return 1;
-            return 0;
-          }
-        );
-        delete this.chunkCache[toDeleteKey];
-      }
+  private async getChunk(chunkKey: string) {
+    if (!this.chunkCache.has(chunkKey)) {
       try {
-        this.chunkCache[chunkKey] = {
-          chunk: objfromJsonPath(this.getDirPath() + `/${chunkKey}.json`),
-          lastUsed: new Date(),
-        };
+        this.chunkCache.set(
+          chunkKey,
+          await objfromJsonPath(this.getDirPath() + `/${chunkKey}.json`)
+        );
       } catch {
-        this.chunkCache[chunkKey] = { chunk: {}, lastUsed: new Date() };
+        this.chunkCache.set(chunkKey, {});
       }
     }
-    return this.chunkCache[chunkKey].chunk;
+    return { ...this.chunkCache.get(chunkKey)! };
   }
 
   private verifyChunks() {
@@ -109,13 +106,14 @@ class Collection {
     return `chunk${this.numChunks() + 1}`;
   }
 
-  constructor(collectionName: string) {
+  constructor(collectionName: string, dataDirPath: string) {
     this.metaData = {
       count: 0,
       chunkInfo: {},
       collectionName: collectionName,
       index: [],
     };
+    this.dataDirPath = dataDirPath;
     if (fs.existsSync(this.getDirPath())) {
       try {
         this.loadInitData();
@@ -128,11 +126,14 @@ class Collection {
     } else {
       this.createCollectionDir();
     }
+    this.chunkCache = new LRUCache({ max: CHUNK_CACHE_LIMIT });
+    this.indexCache = new LRUCache({ max: INDEX_CACHE_LIMIT });
   }
 
-  public getById(id: string) {
-    const chunkKey = this.idChunkMap[id];
-    const chunk = this.getChunk(chunkKey);
+  public async getById(id: string) {
+    const chunkKey = this.idChunkMap.get(id);
+    if (!chunkKey) throw Error("id does not exists in chunk map.");
+    const chunk = await this.getChunk(chunkKey);
     return chunk[id];
   }
 
@@ -140,12 +141,12 @@ class Collection {
     return this.metaData.index.includes(field);
   }
 
-  private updateIndex(
+  private async updateIndex(
     field: string,
     addValueIdsMap: Record<any, string[]>,
     removeValueIdsMap: Record<any, string[]>
   ) {
-    const index: Index = objfromJsonPath(
+    const index: Index = await objfromJsonPath(
       this.getDirPath() + `/${field}Index.json`
     );
     Object.entries(addValueIdsMap).map(([value, ids]) => {
@@ -161,21 +162,27 @@ class Collection {
     writeObjToJson(index, this.getDirPath() + `/${field}Index.json`);
   }
 
-  public getIdsByIndex(field: string, value: any) {
-    // add index cache with node cache.
-    const index: Index = objfromJsonPath(
-      this.getDirPath() + `/${field}Index.json`
-    );
+  public async getIdsByIndex(field: string, value: any) {
+    if (!this.indexCache.has(field)) {
+      try {
+        this.indexCache.set(
+          field,
+          await objfromJsonPath(this.getDirPath() + `/${field}Index.json`)
+        );
+      } catch (err) {
+        throw Error(`Cannot find Index for ${field}.`);
+      }
+    }
 
-    return index[value] ?? [];
+    return this.indexCache.get(field)![value] ?? [];
   }
 
-  private *iterator() {
+  private async *iterator() {
     // iterates over the entire collection.
     const chunkKeys = Object.keys(this.metaData.chunkInfo);
 
     for (const chunkKey of chunkKeys) {
-      const chunk = this.getChunk(chunkKey);
+      const chunk = await this.getChunk(chunkKey);
       for (const document of Object.values(chunk)) {
         yield document;
       }
@@ -183,12 +190,12 @@ class Collection {
   }
 
   // Very Slow.
-  public filter(
+  public async filter(
     filterFunc: (document: Document) => boolean,
     getOne: boolean
-  ): Document[] {
+  ): Promise<Document[]> {
     const foundDocs: Document[] = [];
-    for (const document of this.iterator()) {
+    for await (const document of this.iterator()) {
       if (filterFunc(document)) {
         if (getOne) {
           return [document];
@@ -219,7 +226,7 @@ class Collection {
         this.writes[chunkKey] = { [type]: [data] };
       }
     } else {
-      this.writes = { [chunkKey]: { [type]: [document] } };
+      this.writes = { [chunkKey]: { [type]: [data] } };
     }
   }
 
@@ -236,57 +243,64 @@ class Collection {
     if (!newDocument.id) {
       throw Error("Id must exist in document");
     }
-    const chunkKey = this.idChunkMap[newDocument.id];
+    const chunkKey = this.idChunkMap.get(newDocument.id)!;
 
     this.addToWrite(newDocument, chunkKey, "insert");
   }
 
   public deleteTemp(id: string) {
-    const chunkKey = this.idChunkMap[id];
+    const chunkKey = this.idChunkMap.get(id)!;
 
     this.addToWrite(id, chunkKey, "delete");
   }
 
-  public write() {
+  public async write() {
     if (this.writes) {
-      Object.entries(this.writes).forEach(([chunkKey, write]) => {
-        const chunk = this.getChunk(chunkKey);
-        if (write.insert) {
-          write.insert.forEach((document) => {
-            this.idChunkMap[document.id] = chunkKey;
-            chunk[document.id] = document;
-            this.metaData.count += 1;
-            this.metaData.chunkInfo[chunkKey]
-              ? (this.metaData.chunkInfo[chunkKey].size +=
-                  this.getSize(document))
-              : (this.metaData.chunkInfo[chunkKey] = {
-                  size: this.getSize(document),
-                });
-          });
-        } else if (write.replace) {
-          write.replace.forEach((document) => {
-            this.metaData.chunkInfo[chunkKey].size -= this.getSize(
-              chunk[document.id]
-            );
-            chunk[document.id] = document;
-            this.metaData.chunkInfo[chunkKey].size += this.getSize(document);
-          });
-        } else if (write.delete) {
-          write.delete.forEach((id) => {
-            delete this.idChunkMap[id];
-            this.metaData.chunkInfo[chunkKey].size -= this.getSize(chunk[id]);
-            delete chunk[id];
-            this.metaData.count -= 1;
-          });
-        }
+      await Promise.all(
+        Object.entries(this.writes).map(async ([chunkKey, write]) => {
+          // Investigate if it works
+          const chunk = await this.getChunk(chunkKey);
+          if (write.insert) {
+            write.insert.forEach((document) => {
+              this.idChunkMap.set(document.id, chunkKey);
+              chunk[document.id] = document;
+              this.metaData.count += 1;
+              this.metaData.chunkInfo[chunkKey]
+                ? (this.metaData.chunkInfo[chunkKey].size +=
+                    this.getSize(document))
+                : (this.metaData.chunkInfo[chunkKey] = {
+                    size: this.getSize(document),
+                  });
+            });
+          } else if (write.replace) {
+            write.replace.forEach((document) => {
+              this.metaData.chunkInfo[chunkKey].size -= this.getSize(
+                chunk[document.id]
+              );
+              chunk[document.id] = document;
+              this.metaData.chunkInfo[chunkKey].size += this.getSize(document);
+            });
+          } else if (write.delete) {
+            write.delete.forEach((id) => {
+              this.idChunkMap.delete(id);
+              this.metaData.chunkInfo[chunkKey].size -= this.getSize(chunk[id]);
+              delete chunk[id];
+              this.metaData.count -= 1;
+            });
+          }
 
-        writeObjToJson(chunk, this.getDirPath() + `/${chunkKey}.json`);
-      });
-      writeObjToJson(this.metaData, this.getDirPath() + "/metaData.json");
+          this.chunkCache.set(chunkKey, chunk);
+          await writeObjToJson(chunk, this.getDirPath() + `/${chunkKey}.json`);
+        })
+      );
+      await writeObjToJson(this.metaData, this.getDirPath() + "/metaData.json");
       if (
         Object.values(this.writes).some((write) => write.insert || write.delete)
       ) {
-        writeObjToJson(this.idChunkMap, this.getDirPath() + "/idChunkMap.json");
+        await writeObjToJson(
+          this.idChunkMap,
+          this.getDirPath() + "/idChunkMap.json"
+        );
       }
 
       // update Indexes.
@@ -295,20 +309,20 @@ class Collection {
     }
   }
 
-  public createIndex(field: string) {
+  public async createIndex(field: string) {
     if (this.checkIndex(field)) {
       throw Error("Index already exists");
     }
     const index: Record<any, string[]> = {};
-    for (const document of this.iterator()) {
+    for await (const document of this.iterator()) {
       index[document[field]]?.push(document.id) ||
         (index[document[field]] = [document.id]);
     }
     if (!Object.keys(index).length)
       throw Error("Index cannot be created, documents do not have field.");
     this.metaData.index.push(field);
-    writeObjToJson(index, this.getDirPath() + `/${field}Index.json`);
-    writeObjToJson(this.metaData, this.getDirPath() + "metaData.json");
+    await writeObjToJson(index, this.getDirPath() + `/${field}Index.json`);
+    await writeObjToJson(this.metaData, this.getDirPath() + "metaData.json");
   }
 
   public canWrite() {
@@ -320,7 +334,7 @@ class Collection {
   }
 
   public clearCache() {
-    this.chunkCache = {};
+    this.chunkCache.clear();
   }
 }
 

@@ -44,13 +44,13 @@ class Collection {
     private loadInitData() {
         // In constructor.
         this.metaData = objfromJsonPathSync(
-            this.getDirPath() + '/metaData.json'
+            this.getDirPath() + '/metaData.json',
         )
         if (this.metaData.count !== 0) {
             this.idChunkMap = new Map(
                 Object.entries(
-                    objfromJsonPathSync(this.getDirPath() + '/idChunkMap.json')
-                )
+                    objfromJsonPathSync(this.getDirPath() + '/idChunkMap.json'),
+                ),
             )
         } else {
             this.idChunkMap = new Map()
@@ -64,7 +64,7 @@ class Collection {
         writeObjToJsonSync(this.metaData, this.getDirPath() + '/metaData.json')
         writeObjToJsonSync(
             this.idChunkMap,
-            this.getDirPath() + '/idChunkMap.json'
+            this.getDirPath() + '/idChunkMap.json',
         )
     }
 
@@ -82,8 +82,8 @@ class Collection {
                 this.chunkCache.set(
                     chunkKey,
                     await objfromJsonPath(
-                        this.getDirPath() + `/${chunkKey}.json`
-                    )
+                        this.getDirPath() + `/${chunkKey}.json`,
+                    ),
                 )
             } catch {
                 this.chunkCache.set(chunkKey, {})
@@ -107,7 +107,7 @@ class Collection {
                     return [chunkKey, size]
                 return [chosenKey, minSize]
             },
-            [undefined, MAX_CHUNK_SIZE] as [string | undefined, number]
+            [undefined, MAX_CHUNK_SIZE] as [string | undefined, number],
         )
         if (chosenKey) return chosenKey
         return `chunk${this.numChunks() + 1}`
@@ -151,10 +151,10 @@ class Collection {
     private async updateIndex(
         field: string,
         addValueIdsMap: Record<any, string[]>,
-        removeValueIdsMap: Record<any, string[]>
+        removeValueIdsMap: Record<any, string[]>,
     ) {
         const index: Index = await objfromJsonPath(
-            this.getDirPath() + `/${field}Index.json`
+            this.getDirPath() + `/${field}Index.json`,
         )
         Object.entries(addValueIdsMap).map(([value, ids]) => {
             if (index[value]) {
@@ -175,8 +175,8 @@ class Collection {
                 this.indexCache.set(
                     field,
                     await objfromJsonPath(
-                        this.getDirPath() + `/${field}Index.json`
-                    )
+                        this.getDirPath() + `/${field}Index.json`,
+                    ),
                 )
             } catch (err) {
                 throw Error(`Cannot find Index for ${field}.`)
@@ -201,7 +201,7 @@ class Collection {
     // Very Slow.
     public async filter(
         filterFunc: (document: Document) => boolean,
-        getOne: boolean
+        getOne: boolean,
     ): Promise<Document[]> {
         const foundDocs: Document[] = []
         for await (const document of this.iterator()) {
@@ -219,7 +219,7 @@ class Collection {
     private addToWrite(
         data: Document | string,
         chunkKey: string,
-        type: 'insert' | 'delete' | 'replace'
+        type: 'insert' | 'delete' | 'replace',
     ) {
         if (type === 'delete' && typeof data !== 'string')
             throw Error('Delete op needs data of type string')
@@ -302,22 +302,22 @@ class Collection {
                     this.chunkCache.set(chunkKey, chunk)
                     await writeObjToJson(
                         chunk,
-                        this.getDirPath() + `/${chunkKey}.json`
+                        this.getDirPath() + `/${chunkKey}.json`,
                     )
-                })
+                }),
             )
             await writeObjToJson(
                 this.metaData,
-                this.getDirPath() + '/metaData.json'
+                this.getDirPath() + '/metaData.json',
             )
             if (
                 Object.values(this.writes).some(
-                    (write) => write.insert || write.delete
+                    (write) => write.insert || write.delete,
                 )
             ) {
                 await writeObjToJson(
                     this.idChunkMap,
-                    this.getDirPath() + '/idChunkMap.json'
+                    this.getDirPath() + '/idChunkMap.json',
                 )
             }
 

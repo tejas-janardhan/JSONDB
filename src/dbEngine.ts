@@ -22,7 +22,7 @@ class Engine {
         if (!this.collectionCache.has(collectionName)) {
             this.collectionCache.set(
                 collectionName,
-                new Collection(collectionName, this.dataDirPath)
+                new Collection(collectionName, this.dataDirPath),
             )
         }
         return this.collectionCache.get(collectionName)!
@@ -37,7 +37,7 @@ class Engine {
     private async internalFilter(
         filter: Filter,
         collection: Collection,
-        filterOptions: FilterOptions = {}
+        filterOptions: FilterOptions = {},
     ): Promise<Document[]> {
         let foundDocs: Document[] = []
         const getOne = Boolean(filterOptions.getOne)
@@ -87,7 +87,7 @@ class Engine {
 
     public async insert(
         collectionName: string,
-        newdocs: DocData[]
+        newdocs: DocData[],
     ): Promise<string[]> {
         const collection = this.getCollection(collectionName)
         const insertedIds: string[] = []
@@ -108,7 +108,7 @@ class Engine {
     public async filter(
         collectionName: string,
         filter: Filter,
-        projection: Projection | undefined = undefined
+        projection: Projection | undefined = undefined,
     ): Promise<Document[]> {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)
@@ -120,7 +120,7 @@ class Engine {
                     map[field] = 1
                     return map
                 },
-                {} as Record<string, 1>
+                {} as Record<string, 1>,
             )
             projectionMap['id'] = 1
             projectionMap['updatedAt'] = 1
@@ -140,7 +140,7 @@ class Engine {
     public async update(
         collectionName: string,
         filter: Filter,
-        updateData: DocData
+        updateData: DocData,
     ) {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)
@@ -175,7 +175,7 @@ class Engine {
     public async updateOne(
         collectionName: string,
         filter: Filter,
-        updateData: DocData
+        updateData: DocData,
     ) {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)

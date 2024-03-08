@@ -43,7 +43,7 @@ fastify.post('/op', function (request, reply) {
                 documents: engine.filter(
                     collectionName,
                     payload.filter,
-                    payload.projection
+                    payload.projection,
                 ),
             }
         case 'update':

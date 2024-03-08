@@ -26,7 +26,7 @@ export const writeObjToJsonSync = (obj: Record<any, any>, path: string) => {
 
 export const writeObjToJson = (
     obj: Record<any, any>,
-    path: string
+    path: string,
 ): Promise<void> => {
     return new Promise((resolve, reject) => {
         fs.writeFile(path, JSON.stringify(obj), {}, (err) => {

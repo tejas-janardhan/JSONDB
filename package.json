@@ -21,6 +21,7 @@
     },
     "main": "src/index.ts",
     "scripts": {
-        "test": "yarn mocha -r ts-node/register *.test.ts"
+        "test": "yarn mocha -r ts-node/register *.test.ts",
+        "format": "prettier . --write"
     }
 }

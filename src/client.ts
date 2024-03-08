@@ -29,7 +29,7 @@ class ClientConnection {
 
     public async filter(
         filter: Filter,
-        projection: Projection | undefined = undefined
+        projection: Projection | undefined = undefined,
     ) {
         const response = await axios.post(OP_URL, {
             op: 'filter',

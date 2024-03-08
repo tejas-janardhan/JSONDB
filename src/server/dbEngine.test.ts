@@ -1,7 +1,7 @@
 // Only use the external API. No Stubbing allowed so this stands in as integration test.
 import assert from 'assert'
 import fs from 'fs'
-import { Filter } from './constants'
+import { Filter } from '../constants'
 import Engine from './dbEngine'
 const TEST_DIR_PATH = './test_data'
 

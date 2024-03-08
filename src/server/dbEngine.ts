@@ -6,10 +6,10 @@ import {
     Filter,
     FilterOptions,
     Projection,
-} from './constants'
+} from '../constants'
 import { generateId } from '../utils'
 import { LRUCache } from 'lru-cache'
-import { isObjectEmpty } from './utils'
+import { isObjectEmpty } from '../utils'
 
 // add single index support.
 // add batch writes support

@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import sizeof from 'object-sizeof'
-import { Document, Index } from './constants'
+import { Document, Index } from '../constants'
 import {
     objfromJsonPath,
     objfromJsonPathSync,

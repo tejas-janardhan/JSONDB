@@ -19,9 +19,10 @@
         "object-sizeof": "^2.6.4",
         "snappy": "^7.2.2"
     },
-    "main": "src/index.ts",
+    "main": "src/src/index.ts",
     "scripts": {
         "test": "yarn mocha -r ts-node/register *.test.ts",
-        "format": "prettier . --write"
+        "format": "prettier . --write",
+        "dev:server": "nodemon src/server/index.ts"
     }
 }

@@ -41,10 +41,38 @@ class CollectionClient {
         return response.data.documents
     }
 
+    public async all(
+        filter: Filter,
+        projection: Projection | undefined = undefined,
+    ) {
+        const response = await axios.post(this.opUrl, {
+            op: 'all',
+            collectionName: this.collectionName,
+            payload: { filter, projection },
+        })
+        if (response.status !== 200) {
+            throw Error(response.statusText)
+        }
+        return response.data.documents
+    }
+
     public async count() {
         const response = await axios.post(this.opUrl, {
             op: 'count',
             collectionName: this.collectionName,
+            
+        })
+        if (response.status !== 200) {
+            throw Error(response.statusText)
+        }
+        return response.data.count
+    }
+
+    public async countFilter(filter: Filter) {
+        const response = await axios.post(this.opUrl, {
+            op: 'count',
+            collectionName: this.collectionName,
+            payload: { filter },
         })
         if (response.status !== 200) {
             throw Error(response.statusText)

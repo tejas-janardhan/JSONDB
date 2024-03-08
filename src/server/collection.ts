@@ -18,6 +18,7 @@ const INDEX_CACHE_LIMIT = 4
 // backup support and restore..
 // add compression snappy.
 // improve the size logic its broken, use buffers.
+// support for collection schema.. (unique)
 class Collection {
     // Notes : chunkInfo has a list of all chunks.
     metaData: {

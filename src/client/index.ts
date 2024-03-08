@@ -1,4 +1,4 @@
-import CollectionClient from '../server/collection'
+import CollectionClient from './client'
 
 class JsonDbClient {
     constructor(
@@ -8,7 +8,7 @@ class JsonDbClient {
     public collection(collectionName: string) {
         return new CollectionClient(
             collectionName,
-            `http://${this.host}:${this.port}/op`,
+            `http://${this.port}:${this.host}/op`,
         )
     }
 }

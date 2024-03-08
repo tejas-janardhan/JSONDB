@@ -2,10 +2,16 @@
 
 import JsonDbClient from './src/client'
 
-const client = new JsonDbClient('4354','127.0.0.1' )
-
-client.collection
+const client = new JsonDbClient('4354', '127.0.0.1')
 
 ;(async () => {
-    await client.collection('users').insert({ name: 'Ram Sharma', age: 19 })
+
+    console.log(await client.collection('users').filter({}))
+
+    // await client.collection('users').insert({ name: 'Ram Sharma', age: 19 })
+    // await client.collection('users').insert({ name: 'Ram Sharma 2', age: 19 })
+    // await client.collection('users').insert({ name: 'Ram Sharma 3', age: 29 })
+    // await client.collection('users').insert({ name: 'Ram Sharma 4', age: 49 })
+    // await client.collection('users').insert({ name: 'Ram Sharma 5', age: 39 })
+    // await client.collection('users').insert({ name: 'Ram Sharma 6', age: 29 })
 })()

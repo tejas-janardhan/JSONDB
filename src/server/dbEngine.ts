@@ -113,7 +113,6 @@ class Engine {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)
         const documents = await this.internalFilter(filter, collection)
-
         if (projection) {
             const projectionMap = projection.reduce(
                 (map, field) => {

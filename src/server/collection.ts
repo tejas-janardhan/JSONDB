@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import sizeof from 'object-sizeof'
-import { Document, Index } from '../constants'
+import { Document, HttpError, Index } from '../constants'
 import {
     objfromJsonPath,
     objfromJsonPathSync,
@@ -28,7 +28,7 @@ class Collection {
         index: string[]
     }
     dataDirPath: string
-    idChunkMap: Map<string, string>
+    idChunkMap: Record<string, string>
     writes:
         | Record<
               string,
@@ -48,20 +48,18 @@ class Collection {
             this.getDirPath() + '/metaData.json',
         )
         if (this.metaData.count !== 0) {
-            this.idChunkMap = new Map(
-                Object.entries(
-                    objfromJsonPathSync(this.getDirPath() + '/idChunkMap.json'),
-                ),
+            this.idChunkMap = objfromJsonPathSync(
+                this.getDirPath() + '/idChunkMap.json',
             )
         } else {
-            this.idChunkMap = new Map()
+            this.idChunkMap = {}
         }
     }
 
     private createCollectionDir() {
         // In constructor.
         fs.mkdirSync(this.getDirPath())
-        this.idChunkMap = new Map()
+        this.idChunkMap = {}
         writeObjToJsonSync(this.metaData, this.getDirPath() + '/metaData.json')
         writeObjToJsonSync(
             this.idChunkMap,
@@ -139,7 +137,7 @@ class Collection {
     }
 
     public async getById(id: string) {
-        const chunkKey = this.idChunkMap.get(id)
+        const chunkKey = this.idChunkMap[id]
         if (!chunkKey) throw Error('id does not exists in chunk map.')
         const chunk = await this.getChunk(chunkKey)
         return chunk[id]
@@ -227,7 +225,7 @@ class Collection {
 
         if (this.writes) {
             if (this.writes[chunkKey] && this.writes[chunkKey][type]) {
-                // @ts-ignore Added due to if gaurd above,
+                // @ts-ignore Added due to if guard above,
                 this.writes[chunkKey][type]!.push(data)
             } else if (this.writes[chunkKey]) {
                 // @ts-ignore
@@ -253,26 +251,26 @@ class Collection {
         if (!newDocument.id) {
             throw Error('Id must exist in document')
         }
-        const chunkKey = this.idChunkMap.get(newDocument.id)!
+        const chunkKey = this.idChunkMap[newDocument.id]
 
         this.addToWrite(newDocument, chunkKey, 'insert')
     }
 
     public deleteTemp(id: string) {
-        const chunkKey = this.idChunkMap.get(id)!
-
+        const chunkKey = this.idChunkMap[id]
         this.addToWrite(id, chunkKey, 'delete')
     }
 
     public async write() {
         if (this.writes) {
+            console.log(this.writes)
             await Promise.all(
                 Object.entries(this.writes).map(async ([chunkKey, write]) => {
                     // Investigate if it works
                     const chunk = await this.getChunk(chunkKey)
                     if (write.insert) {
                         write.insert.forEach((document) => {
-                            this.idChunkMap.set(document.id, chunkKey)
+                            this.idChunkMap[document.id] = chunkKey
                             chunk[document.id] = document
                             this.metaData.count += 1
                             this.metaData.chunkInfo[chunkKey]
@@ -292,7 +290,7 @@ class Collection {
                         })
                     } else if (write.delete) {
                         write.delete.forEach((id) => {
-                            this.idChunkMap.delete(id)
+                            delete this.idChunkMap[id]
                             this.metaData.chunkInfo[chunkKey].size -=
                                 this.getSize(chunk[id])
                             delete chunk[id]
@@ -316,12 +314,12 @@ class Collection {
                     (write) => write.insert || write.delete,
                 )
             ) {
+                console.log('HIT')
                 await writeObjToJson(
                     this.idChunkMap,
                     this.getDirPath() + '/idChunkMap.json',
                 )
             }
-
             // update Indexes.
 
             this.writes = undefined

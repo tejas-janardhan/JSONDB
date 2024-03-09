@@ -28,6 +28,7 @@ export const writeObjToJson = (
     obj: Record<any, any>,
     path: string,
 ): Promise<void> => {
+    console.log(path)
     return new Promise((resolve, reject) => {
         fs.writeFile(path, JSON.stringify(obj), {}, (err) => {
             if (err) {

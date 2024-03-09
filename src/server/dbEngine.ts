@@ -5,6 +5,7 @@ import {
     Document,
     Filter,
     FilterOptions,
+    HttpError,
     Projection,
 } from '../constants'
 import { generateId } from '../utils'
@@ -30,7 +31,7 @@ class Engine {
 
     private validateFilter(filter: Filter): void {
         if (isObjectEmpty(filter)) {
-            throw Error('Empty filter.')
+            throw new HttpError({ code: 400, message: 'Filter not found!' })
         }
     }
 
@@ -59,6 +60,7 @@ class Engine {
         }
 
         const docFilterFunc = (document: Document): boolean => {
+            // Add deep equal instead from a fast lib
             return Object.entries(filterRest).every(([field, value]) => {
                 return document[field] === value
             })
@@ -70,6 +72,14 @@ class Engine {
             return foundDocs.filter(docFilterFunc)
         }
         return foundDocs
+    }
+
+    private project(documents: Document[], projection: Projection): DocData[] {
+        return documents.map((document) =>
+            projection.reduce<DocData>((doc, key) => {
+                return { ...doc, key: document[key] }
+            }, {}),
+        )
     }
 
     constructor(dataDirPath: string | undefined = undefined) {
@@ -109,30 +119,31 @@ class Engine {
         collectionName: string,
         filter: Filter,
         projection: Projection | undefined = undefined,
-    ): Promise<Document[]> {
+    ): Promise<Document[] | DocData[]> {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)
         const documents = await this.internalFilter(filter, collection)
         if (projection) {
-            const projectionMap = projection.reduce(
-                (map, field) => {
-                    map[field] = 1
-                    return map
-                },
-                {} as Record<string, 1>,
-            )
-            projectionMap['id'] = 1
-            projectionMap['updatedAt'] = 1
-            projectionMap['createdAt'] = 1
-            // iterate over projection not the document
-            return documents.map((document) => {
-                Object.keys(document).forEach((field) => {
-                    if (!projectionMap[field]) delete document[field]
-                })
-                return document
-            })
+            return this.project(documents, projection)
         } else {
             return documents
+        }
+    }
+
+    public async filterOne(
+        collectionName: string,
+        filter: Filter,
+        projection: Projection | undefined = undefined,
+    ): Promise<Document | DocData> {
+        this.validateFilter(filter)
+        const collection = this.getCollection(collectionName)
+        const documents = await this.internalFilter(filter, collection, {
+            getOne: true,
+        })
+        if (projection) {
+            return this.project(documents, projection)[0]
+        } else {
+            return documents[0]
         }
     }
 
@@ -145,7 +156,11 @@ class Engine {
         const collection = this.getCollection(collectionName)
         const foundDocs = await this.internalFilter(filter, collection)
 
-        if (!foundDocs.length) throw Error('Cannot find any elements to update')
+        if (!foundDocs.length)
+            throw new HttpError({
+                code: 400,
+                message: 'Cannot find any elements to update',
+            })
 
         foundDocs.forEach((document) => {
             collection.replaceTemp({
@@ -163,7 +178,11 @@ class Engine {
         const collection = this.getCollection(collectionName)
         const foundDocs = await this.internalFilter(filter, collection)
 
-        if (!foundDocs.length) throw Error('Cannot find any elements to delete')
+        if (!foundDocs.length)
+            throw new HttpError({
+                code: 400,
+                message: 'Cannot find any elements to delete',
+            })
 
         foundDocs.forEach((document) => {
             collection.deleteTemp(document.id)
@@ -182,7 +201,11 @@ class Engine {
             getOne: true,
         })
 
-        if (!foundDoc) throw Error('Cannot find any element to update')
+        if (!foundDoc)
+            throw new HttpError({
+                code: 400,
+                message: 'Cannot find any element to update',
+            })
         collection.replaceTemp({
             ...foundDoc,
             ...updateData,
@@ -198,7 +221,11 @@ class Engine {
             getOne: true,
         })
 
-        if (!foundDoc) throw Error('Cannot find any element to delete')
+        if (!foundDoc)
+            throw new HttpError({
+                code: 400,
+                message: 'Cannot find any element to delete',
+            })
         collection.deleteTemp(foundDoc.id)
         await collection.write()
     }

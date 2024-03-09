@@ -12,3 +12,10 @@ export type FilterOptions = {
 }
 export type Projection = Array<string>
 export type Index = Record<string, string[]>
+export class HttpError extends Error {
+    code: number
+    constructor({ message, code }: { message: string; code: number }) {
+        super(message)
+        this.code = code
+    }
+}

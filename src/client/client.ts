@@ -6,6 +6,8 @@ import axios from 'axios'
 // add bulk writes
 // add ts collection support
 
+axios.defaults.validateStatus = () => true
+
 class CollectionClient {
     constructor(
         readonly collectionName: string,
@@ -21,7 +23,7 @@ class CollectionClient {
             },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return true
     }
@@ -36,22 +38,34 @@ class CollectionClient {
             payload: { filter, projection },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return response.data.documents
     }
 
-    public async all(
+    public async filterOne(
         filter: Filter,
         projection: Projection | undefined = undefined,
     ) {
         const response = await axios.post(this.opUrl, {
-            op: 'all',
+            op: 'filterOne',
             collectionName: this.collectionName,
             payload: { filter, projection },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
+        }
+        return response.data.documents
+    }
+
+    public async all(projection: Projection | undefined = undefined) {
+        const response = await axios.post(this.opUrl, {
+            op: 'all',
+            collectionName: this.collectionName,
+            payload: { projection },
+        })
+        if (response.status !== 200) {
+            throw Error(response.data)
         }
         return response.data.documents
     }
@@ -60,10 +74,9 @@ class CollectionClient {
         const response = await axios.post(this.opUrl, {
             op: 'count',
             collectionName: this.collectionName,
-            
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return response.data.count
     }
@@ -75,7 +88,7 @@ class CollectionClient {
             payload: { filter },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return response.data.count
     }
@@ -87,7 +100,7 @@ class CollectionClient {
             payload: { filter, data },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return true
     }
@@ -99,7 +112,7 @@ class CollectionClient {
             payload: { filter },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return true
     }
@@ -111,7 +124,7 @@ class CollectionClient {
             payload: { filter, data },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return true
     }
@@ -123,7 +136,7 @@ class CollectionClient {
             payload: { filter },
         })
         if (response.status !== 200) {
-            throw Error(response.statusText)
+            throw Error(response.data)
         }
         return true
     }

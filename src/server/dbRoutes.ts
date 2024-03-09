@@ -46,6 +46,13 @@ export const addRoutes = (fastify: FastifyInstance) => {
                 }
                 await engine.insert(collectionName, payload.documents)
                 return {}
+            case 'all':
+                return {
+                    documents: await engine.all(
+                        collectionName,
+                        payload.projection,
+                    ),
+                }
             case 'filter':
                 if (!payload.filter) {
                     throw new HttpError({

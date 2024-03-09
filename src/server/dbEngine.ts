@@ -116,6 +116,20 @@ class Engine {
         return insertedIds
     }
 
+    public async all(
+        collectionName: string,
+        projection: Projection | undefined = undefined,
+    ): Promise<Document[] | DocData[]> {
+        const collection = this.getCollection(collectionName)
+        const documents = await collection.all()
+        console.log(documents)
+        if (projection) {
+            return this.project(documents, projection)
+        } else {
+            return documents
+        }
+    }
+
     public async filter(
         collectionName: string,
         filter: Filter,

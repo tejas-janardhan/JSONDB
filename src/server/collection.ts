@@ -197,6 +197,24 @@ class Collection {
         }
     }
 
+    private async *bulkIterator() {
+        // iterates over the entire collection.
+        const chunkKeys = Object.keys(this.metaData.chunkInfo)
+
+        for (const chunkKey of chunkKeys) {
+            const chunk = await this.getChunk(chunkKey)
+            yield Object.values(chunk)
+        }
+    }
+
+    public async all(): Promise<Document[]> {
+        const documents_: Document[] = []
+        for await (const documents of this.bulkIterator()) {
+            documents_.push(...documents)
+        }
+        return documents_
+    }
+
     // Very Slow.
     public async filter(
         filterFunc: (document: Document) => boolean,

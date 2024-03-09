@@ -54,9 +54,10 @@ class Engine {
                 }
                 return []
             }
+
             foundDocs = (
                 await Promise.all(ids.map((id) => collection.getById(id)))
-            ).filter((document) => Boolean(document))
+            ).filter((document) => Boolean(document)) as Document[]
         }
 
         const docFilterFunc = (document: Document): boolean => {

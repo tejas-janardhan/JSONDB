@@ -138,7 +138,7 @@ class Collection {
 
     public async getById(id: string) {
         const chunkKey = this.idChunkMap[id]
-        if (!chunkKey) throw Error('id does not exists in chunk map.')
+        if (!chunkKey) return
         const chunk = await this.getChunk(chunkKey)
         return chunk[id]
     }

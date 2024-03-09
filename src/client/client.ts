@@ -55,7 +55,7 @@ class CollectionClient {
         if (response.status !== 200) {
             throw Error(response.data)
         }
-        return response.data.documents
+        return response.data.document
     }
 
     public async all(projection: Projection | undefined = undefined) {

@@ -23,7 +23,9 @@
     "scripts": {
         "test": "yarn mocha -r ts-node/register *.test.ts",
         "format": "prettier . --write",
-        "dev:server": "nodemon src/server/index.ts --ignore data/"
+        "dev:server": "nodemon src/server/index.ts --ignore data/",
+        "build": "",
+        "prod:server": ""
     },
     "nodemonConfig": {
         "ignore": [

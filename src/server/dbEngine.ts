@@ -122,7 +122,6 @@ class Engine {
     ): Promise<Document[] | DocData[]> {
         const collection = this.getCollection(collectionName)
         const documents = await collection.all()
-        console.log(documents)
         if (projection) {
             return this.project(documents, projection)
         } else {

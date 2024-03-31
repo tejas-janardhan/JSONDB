@@ -11,6 +11,7 @@ export type FilterOptions = {
     getOne?: boolean
 }
 export type Projection = Array<string>
+export type Populate = Array<string>
 export type Index = Record<string, string[]>
 export class HttpError extends Error {
     code: number
@@ -19,3 +20,4 @@ export class HttpError extends Error {
         this.code = code
     }
 }
+export const UNIQUE_FORIEGN_FIELD_OBJ = { _jsondb_i9i_: '_jsondb_i8i_' }

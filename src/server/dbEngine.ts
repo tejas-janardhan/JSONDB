@@ -6,11 +6,14 @@ import {
     Filter,
     FilterOptions,
     HttpError,
+    Populate,
     Projection,
+    UNIQUE_FORIEGN_FIELD_OBJ,
 } from '../constants'
 import { generateId } from '../utils'
 import { LRUCache } from 'lru-cache'
 import { isObjectEmpty } from '../utils'
+import equal from 'deep-equal'
 
 // add single index support.
 // add batch writes support
@@ -63,7 +66,18 @@ class Engine {
         const docFilterFunc = (document: Document): boolean => {
             // Add deep equal instead from a fast lib
             return Object.entries(filterRest).every(([field, value]) => {
-                return document[field] === value
+                if (
+                    '_jsondb_i9i_' in document[field] &&
+                    document[field]._jsondb_i9i_ ===
+                        UNIQUE_FORIEGN_FIELD_OBJ._jsondb_i9i_
+                ) {
+                    if (Array.isArray(value)) {
+                        return value.includes(document[field].id)
+                    } else {
+                        return value === document[field].id
+                    }
+                }
+                return equal(document[field], value)
             })
         }
 
@@ -80,6 +94,36 @@ class Engine {
             projection.reduce<DocData>((doc, key) => {
                 return { ...doc, key: document[key] }
             }, {}),
+        )
+    }
+
+    private async populate(
+        documents: Document[],
+        populate: Populate,
+    ): Promise<DocData[]> {
+        return await Promise.all(
+            documents.map(async (document) => {
+                return Object.fromEntries(
+                    await Promise.all(
+                        Object.entries(document).map(async ([key, value]) => {
+                            if (
+                                populate.includes(key) &&
+                                '_jsondb_i9i_' in value &&
+                                value._jsondb_i9i_ ===
+                                    UNIQUE_FORIEGN_FIELD_OBJ._jsondb_i9i_
+                            ) {
+                                value.populatedDoc = await this.internalFilter(
+                                    { id: value.id },
+                                    value.collectionName,
+                                    { getOne: true },
+                                )
+                                return [key, value]
+                            }
+                            return [key, value]
+                        }),
+                    ),
+                )
+            }),
         )
     }
 
@@ -133,32 +177,50 @@ class Engine {
         collectionName: string,
         filter: Filter,
         projection: Projection | undefined = undefined,
+        populate: Populate | undefined = undefined,
     ): Promise<Document[] | DocData[]> {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)
-        const documents = await this.internalFilter(filter, collection)
+        let documents: Document[] | DocData[] = await this.internalFilter(
+            filter,
+            collection,
+        )
+
         if (projection) {
-            return this.project(documents, projection)
-        } else {
-            return documents
+            documents = this.project(documents as Document[], projection)
         }
+
+        if (populate) {
+            documents = await this.populate(documents as Document[], populate)
+        }
+
+        return documents
     }
 
     public async filterOne(
         collectionName: string,
         filter: Filter,
         projection: Projection | undefined = undefined,
+        populate: Populate | undefined = undefined,
     ): Promise<Document | DocData> {
         this.validateFilter(filter)
         const collection = this.getCollection(collectionName)
-        const documents = await this.internalFilter(filter, collection, {
-            getOne: true,
-        })
+        let documents: Document[] | DocData[] = await this.internalFilter(
+            filter,
+            collection,
+            {
+                getOne: true,
+            },
+        )
         if (projection) {
-            return this.project(documents, projection)[0]
-        } else {
-            return documents[0]
+            documents = this.project(documents as Document[], projection)
         }
+
+        if (populate) {
+            documents = await this.populate(documents as Document[], populate)
+        }
+
+        return documents[0]
     }
 
     public async update(

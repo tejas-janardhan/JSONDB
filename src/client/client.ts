@@ -1,5 +1,6 @@
 import { DocData, Filter, Projection } from '../constants'
 import axios from 'axios'
+import { deSerialise, serialise } from './serialize'
 
 // add get all, flush, update all,
 // add find - only gets one
@@ -19,7 +20,9 @@ class CollectionClient {
             op: 'insert',
             collectionName: this.collectionName,
             payload: {
-                documents: Array.isArray(documents) ? documents : [documents],
+                documents: Array.isArray(documents)
+                    ? documents.map((doc) => serialise(doc))
+                    : [serialise(documents)],
             },
         })
         if (response.status !== 200) {
@@ -40,7 +43,7 @@ class CollectionClient {
         if (response.status !== 200) {
             throw Error(response.data)
         }
-        return response.data.documents
+        return response.data.documents.map((doc: DocData) => deSerialise(doc))
     }
 
     public async filterOne(
@@ -55,7 +58,7 @@ class CollectionClient {
         if (response.status !== 200) {
             throw Error(response.data)
         }
-        return response.data.document
+        return deSerialise(response.data.document)
     }
 
     public async all(projection: Projection | undefined = undefined) {
@@ -67,7 +70,7 @@ class CollectionClient {
         if (response.status !== 200) {
             throw Error(response.data)
         }
-        return response.data.documents
+        return response.data.documents.map((doc: DocData) => deSerialise(doc))
     }
 
     public async count() {

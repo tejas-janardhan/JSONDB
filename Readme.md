@@ -23,7 +23,31 @@ JSON DB stands on the shoulders of giants. You can think of JSON DB as the produ
 
 ## Getting started
 
-Run the dev server with this command: `npm run dev:server`. Import the client class into any test file to run the client side api.
+Run the dev server with this command: `npm run dev:server`. Import the client class into any file to run the client side api like shown below.
+
+`import JsonDbClient from './src/client'
+
+const client = new JsonDbClient('4354', '127.0.0.1')
+
+;(async () => {
+    const usersCollection = client.collection('users')
+    
+    await usersCollection.insert({ name: 'Ram Sharma', age: 19 })
+    await usersCollection.insert({ name: 'John Mack', age: 19 })
+    await usersCollection.insert({ name: 'Mack Remariz', age: 29 })
+    await usersCollection.insert({ name: 'Sid Gupta', age: 49 })
+    await usersCollection.insert({ name: 'Yaun Lee', age: 39 })
+    await usersCollection.insert({ name: 'Lee Hun Jin', age: 29 })
+
+    await usersCollection.update({ name:'Ram Sharma' }, {age:30})
+    
+    console.log(await usersCollection.filterOne({name:'Ram Sharma'}), { name: 'Ram Sharma', age: 30 })
+
+    await usersCollection.delete({name:'Ram Sharma 2'})
+
+    console.log(await usersCollection.filterOne({name:'Ram Sharma 2'}))
+})()`
+
 
 ## Feature set
 

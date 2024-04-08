@@ -70,4 +70,4 @@ This project is still in early alpha, so we have many features soon to come! Che
 
 ## Have an idea? Notice a bug?
 
-We'd love to hear your feedback! Feel free to log an issue on our [GitHub issues page](https://github.com/tejas-janardhan/JSONDB).
+We'd love to hear your feedback! Feel free to log an issue on our [GitHub issues page](https://github.com/tejas-janardhan/JSONDB/issues).
